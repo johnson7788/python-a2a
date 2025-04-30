@@ -93,19 +93,16 @@ class StreamingAgent(A2AServer):
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            logger.info("Creating a new event loop in a sub-thread.")
+            logging.info("Creating a new event loop in a sub-thread.")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
         loop.run_until_complete(self.setup_tools())
+        logging.info(f"初始化Agent和MCP工具成功")
 
     async def setup_tools(self):
         """
         启动所有的MCP工具
         """
-        if not self.is_ready:
-             print("Agent cannot be set up: Model not found.")
-             return False
-
         print("Starting MCP servers...")
         successful_servers = {}
         all_functions = []
@@ -171,7 +168,7 @@ class StreamingAgent(A2AServer):
             self.tool_ready = False # Cannot run without servers
             return False
 
-        print(f"Found {len(self.all_functions)} tools.")
+        print(f"Found {len(self.all_functions)} tools.它们是: {self.all_functions}")
         self.tool_ready = True # Setup was successful
         return True
     def handle_message(self, message):
