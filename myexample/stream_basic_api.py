@@ -4,7 +4,7 @@
 # @File  : stream_api.py
 # @Author: johnson
 # @Contact : github: johnson7788
-# @Desc  : A2A的Stream Client的API
+# @Desc  : A2A的Stream Client的API, 可以被前端调用
 
 import sys
 import argparse
@@ -257,7 +257,6 @@ class EnhancedClient(A2AClient):
 
 
 # stream_with_progress：打印的每个 chunk 连在一起输出，模拟自然语言流式生成体验。
-# visualize_streaming：每个 chunk 都以 [Chunk N] 为前缀，清楚标识块数和时间差，更适合调试或开发阶段观察数据流入的规律。
 async def stream_with_progress(client, message):
     """Stream a response with a progress visualization."""
     total_chars = 0
@@ -314,60 +313,6 @@ async def stream_with_progress(client, message):
         print(f"\nError during streaming: {e}")
         return None
 
-
-async def visualize_streaming(client, message):
-    """Stream a response with visual chunk indicators."""
-    chunk_count = 0
-    total_chars = 0
-    received_chunks = []
-    start_time = time.time()
-
-    print("\nStreaming response with chunk visualization:")
-    print("-" * 60)
-
-    # Function to handle each chunk with visual indicators
-    def handle_chunk(chunk):
-        nonlocal chunk_count, total_chars
-        chunk_count += 1
-        total_chars += len(chunk)
-        received_chunks.append(chunk)
-
-        # Print chunk with a visual indicator
-        print(f"\n[Chunk {chunk_count}] ", end="")
-        print(chunk, end="")
-
-        # Print chunk size and timing information
-        elapsed = time.time() - start_time
-        print(f" ({len(chunk)} chars, +{elapsed:.2f}s)", end="", flush=True)
-
-    # Process the streaming response
-    try:
-        async for _ in client.stream_response(message, chunk_callback=handle_chunk):
-            # Just process with the callback
-            pass
-
-        # Calculate final stats
-        elapsed = time.time() - start_time
-        chars_per_sec = total_chars / elapsed if elapsed > 0 else 0
-
-        # Combine all chunks into the full response
-        full_response = "".join(received_chunks)
-
-        # Print final stats
-        print("\n" + "-" * 60)
-        print(f"Streaming complete:")
-        print(f"- Total characters: {total_chars}")
-        print(f"- Chunks received: {chunk_count}")
-        print(f"- Time elapsed: {elapsed:.2f} seconds")
-        print(f"- Average speed: {chars_per_sec:.1f} characters/second")
-
-        return full_response
-
-    except Exception as e:
-        print(f"\nError during streaming: {e}")
-        return None
-
-
 def main():
     """Run the streaming example."""
     # Parse command line arguments
@@ -377,7 +322,6 @@ def main():
     parser.add_argument("--agent", type=str, default="http://127.0.0.1:6002",help="Agent url")
     parser.add_argument("--debug", action="store_true", help="Show debug information")
     args = parser.parse_args()
-    mode = "stream"   #stream 或者visualize
     print("=== Basic Streaming Example ===\n")
     print(f"连接Agent并进行请求")
 
@@ -408,31 +352,9 @@ def main():
             print("Checking streaming support...")
 
         supports_streaming = loop.run_until_complete(client.check_streaming_support())
-
-        if supports_streaming:
-            print("✓ Agent supports streaming responses")
-
-            # Choose streaming mode based on argument
-            if mode == "visualize":
-                loop.run_until_complete(visualize_streaming(client, message))
-            else:
-                loop.run_until_complete(stream_with_progress(client, message))
-
-        else:
-            print("✓ Agent supports simulated streaming")
-            print("Falling back to simulated streaming mode...")
-
-            # Test the raw message send first if debugging
-            if args.debug:
-                print("Testing direct message send...")
-                response = client.send_message(message)
-                print(f"Direct response received: {response.content.text[:50]}...")
-
-            # Use simulated streaming
-            if mode == "visualize":
-                loop.run_until_complete(visualize_streaming(client, message))
-            else:
-                loop.run_until_complete(stream_with_progress(client, message))
+        assert supports_streaming, "Agent必须支持流的形式的输出"
+        print("✓ Agent supports streaming responses")
+        loop.run_until_complete(stream_with_progress(client, message))
 
     except KeyboardInterrupt:
         print("\nStreaming interrupted by user")
