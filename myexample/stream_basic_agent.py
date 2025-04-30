@@ -26,12 +26,25 @@ import socket
 import random
 from flask import Flask, request, jsonify, Response
 import json
+import logging
 
 from python_a2a import (
     A2AServer, A2AClient, AgentCard, AgentSkill,
     Message, TextContent, MessageRole,
     Task, TaskStatus, TaskState
 )
+from mcp_client.client import SSEMCPClient,MCPClient,generate_text,process_tool_call
+from mcp_client.utils import load_mcp_config_from_file
+from dotenv import load_dotenv
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+load_dotenv()
 
 # Import necessary components - using A2AClient instead of abstract StreamingClient
 try:
@@ -52,7 +65,7 @@ class StreamingAgent(A2AServer):
     chunks with deliberate delays to create a realistic streaming effect.
     """
     
-    def __init__(self):
+    def __init__(self, config_path="mcp_config.json", model_name="deepseek"):
         """Initialize the streaming agent with appropriate capabilities."""
         agent_card = AgentCard(
             name="Streaming Agent",
@@ -69,7 +82,98 @@ class StreamingAgent(A2AServer):
             ]
         )
         super().__init__(agent_card=agent_card)
-    
+        self.config_path = config_path
+        self.model_name = model_name
+        self.config = load_mcp_config_from_file(config_path)
+        self.servers_cfg = self.config.get("mcpServers", {})
+        self.servers = {}
+        self.all_functions = []
+        self.conversation = [] # Initial conversation might be built later in run() or here
+        self.tool_ready = False
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.info("Creating a new event loop in a sub-thread.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.run_until_complete(self.setup_tools())
+
+    async def setup_tools(self):
+        """
+        启动所有的MCP工具
+        """
+        if not self.is_ready:
+             print("Agent cannot be set up: Model not found.")
+             return False
+
+        print("Starting MCP servers...")
+        successful_servers = {}
+        all_functions = []
+        # 初始化MCP的server
+        for server_name, conf in self.servers_cfg.items():
+            client = None
+            if "url" in conf:  # SSE server
+                client = SSEMCPClient(server_name, conf["url"])
+            elif "command" in conf:  # Local process-based server
+                 client = MCPClient(
+                     server_name=server_name,
+                     command=conf.get("command"),
+                     args=conf.get("args", []),
+                     env=conf.get("env", {})
+                 )
+            else:
+                 if not self.quiet_mode:
+                     print(f"[WARN] Skipping server {server_name}: No 'url' or 'command' specified.")
+                 continue
+
+            try:
+                ok = await client.start() # <-- AWAIT is valid here (inside async def)
+                if not ok:
+                    if not self.quiet_mode:
+                        print(f"[WARN] Could not start server {server_name}")
+                    # Ensure client is stopped even if start failed
+                    if client: await client.stop()
+                    continue
+                else:
+                    print(f"[MCP Tool OK] {server_name}")
+                    successful_servers[server_name] = client
+
+                    # gather tools
+                    try:
+                         tools = await client.list_tools() # <-- AWAIT is valid here
+                         for t in tools:
+                             input_schema = t.get("inputSchema") or {"type": "object", "properties": {}}
+                             fn_def = {
+                                 "name": f"{server_name}_{t['name']}",
+                                 "description": t.get("description", ""),
+                                 "parameters": input_schema
+                             }
+                             all_functions.append(fn_def)
+                    except Exception as e:
+                        if not self.quiet_mode:
+                            print(f"[WARN] Error listing tools for {server_name}: {e}")
+                        # Consider if failing to list tools should stop processing for this server
+
+
+            except Exception as e: # Catch potential errors during client creation or start
+                if not self.quiet_mode:
+                    print(f"[WARN] Exception starting server {server_name}: {e}")
+                # Ensure client is stopped if created before exception
+                if 'client' in locals() and client: await client.stop()
+
+
+        self.servers = successful_servers
+        self.all_functions = all_functions
+
+        if not self.servers:
+            error_msg = "No MCP servers could be started."
+            print(f"[ERROR] {error_msg}")
+            self.tool_ready = False # Cannot run without servers
+            return False
+
+        print(f"Found {len(self.all_functions)} tools.")
+        self.tool_ready = True # Setup was successful
+        return True
     def handle_message(self, message):
         """Handle a message request with a complete response."""
         # Extract the query from the message

@@ -1,0 +1,13 @@
+fastmcp
+pydantic-settings==2.8.1
+pydantic==2.11.3
+mcp
+lmstudio
+jwcrypto
+pyjwt
+cryptography
+aiohttp
+openai==1.75.0
+httpx-sse
+openai
+starlette

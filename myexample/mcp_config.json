@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+  "LNGPrice": {
+    "command": "uv",
+    "args": [
+      "run",
+      "--with",
+      "fastmcp",
+      "fastmcp",
+      "run",
+      "mcpserver/Simulate_LNG_Price.py"
+    ]
+  }
+  }
+}
